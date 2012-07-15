@@ -11,71 +11,115 @@ var Plugin = function () {
      ];
      
     this.help = [
-        ["!start", "Creates a new game for this channel if one isn't already started"],
+        ["!start", "Creates a new game for this channelnel if one isn't already started"],
         ["!guess <letter(s)>", "Guess n letters on the current game being played."]
     ];
           
     this.currentGames = {};
-}
+    return this;
+};
+
 Plugin.prototype = {
-    tryCreateGame : function(chan, user, mask, match) {
+    tryCreateGame : function(channel, user, mask, match) {
         var currentGames = this.currentGames;
-        var channelGame = this.getGame(chan);
+        var channelGame = this.getGame(channel);
         if(channelGame !== undefined) { 
-            this.say(chan, "Can not start game! A Game already running - Started by " + channelGame.user + "");
+            this.say(channel, "Can not start game! A Game already running - Started by " + channelGame.user + "");
         } else {
-            var newGame = this.startNewGame(chan, user);
-            currentGames[chan] = newGame;
-            this.say(chan, "New game started by " + user + "! The word is : " + newGame.modifiedWord);
+            channelGame = this.startNewGame(channel, user);
+            currentGames[channel] = channelGame;
+            this.say(channel, "New game started by " + user + "! The word is : " + channelGame.modifiedWord);
         }
+
         return channelGame;
     },
-    tryGuess : function(chan, user, mask, match) {
-        throw new Error("no");
-    },
-    startNewGame : function(chan, user) { 
-        var randomWord = this.getRandomWord();
-
-        var game = { 
-            "channel" : chan,
-            "user" : user, 
-            "rawWord" : randomWord,
-            "modifiedWord" : randomWord.replace(/./g, "_"),
-            // TODO - Test if map would be better
-            "guessedLetters" : new Array(26)
+    tryGuess : function(channel, user, mask, match) {
+        var channelGame = this.getGame(channel);
+        if(channelGame === undefined) {
+            this.say("No game has been started for this channel. To begin one, use the '!start' command. ");
+            return;
         }
+                
+        channelGame.guessLetter(match.charAt(0));
+        if(channelGame.isComplete()){ 
+            this.say("Well done! " + user + " + has won the game! The word was : " + channelGame.rawWord);
+            delete this.currentGames[channel];
+        }
+    },
+    startNewGame : function(channel, user) { 
+        var randomWord = this.getRandomWord();
+        var game = new HangmanGame(channel, user, randomWord);
+        game.say = this.say;
         return game;
     },
     getRandomWord : function(game) {
         return "testingabc123";
     },
-    getGame : function(chan) {
-        return this.currentGames[chan];
-    },
-    guessLetter : function(game, letter) {
-       letter = letter.toLowerCase();
-       var intVal = letter.charCodeAt(0) - 97;
-       if(!(intVal >= 0 && intVal <= 26)) {
-        this.say("Invalid character " + letter + ". a-z only");
-       }
-       var guessedLetters = game.guessedLetters;
-       if(guessedLetters[intVal]) {
-           this.say("You have already guessed the letter " + letter + ". Try again");
-        } else {
-            this.say("You guessed " + letter);
-
-            guessedLetters[intVal] = true;
-        }
+    getGame : function(channel) {
+        return this.currentGames[channel];
     },
     init: function (parent) {
         this.parent = parent;
     },
 };
 
+var HangmanGame = function(channel, user, word){
+    this.channel = channel;
+    this.user = user;
+    
+    // TODO array of char is better.
+    this.rawWord = word;   
+    this.modifiedWord = word.replace(/./g, "_");
+    
+    this.guessedLetters = new Array(26);
+
+    return this;
+};
+
+HangmanGame.prototype = {
+    guessLetter : function(letter) {
+        letter = letter.toLowerCase();
+        var intVal = letter.charCodeAt(0) - 97;
+        if(!(intVal >= 0 && intVal <= 26)) {
+            this.say("Invalid character " + letter + ". a-z only");
+        }
+        var guessedLetters = this.guessedLetters;
+        if(guessedLetters[intVal]) {
+            this.say("You have already guessed the letter " + letter + ". Try again");
+        } else {
+            this.say("You guessed " + letter);
+            
+            var charFound = false;
+            
+            for(var i in this.rawWord) {
+                i = parseInt(i, 10);
+                if(this.rawWord[i] === letter) {
+                    var str = this.modifiedWord;
+                    this.modifiedWord = str.substr(0, i) + letter + str.substr(1 + i);
+                    charFound = true;
+                }
+            }
+            
+            if(charFound) {
+                this.say("You guessed correctly! The word is now : " + this.modifiedWord);
+            } else {
+                this.say("Character not found! " + this.modifiedWord);
+            }
+            
+            guessedLetters[intVal] = true;
+        }
+    },
+    isComplete : function(){
+        return this.modifiedWord.indexOf("_") === -1;
+    }
+};
+
+
 // TDD plz
 (function tests() {   
     // Helper methods
     var Assert = (function() {
+        this.log = console.log;
         var assertFunctions = {
             "assertEqual" : function(expected, actual) { return expected === actual; },
             "assertNotEqual" : function(expected, actual) { return expected !== actual; },
@@ -93,7 +137,7 @@ Plugin.prototype = {
                     if(!assertPassed) {
                         throw new Error("FAILED : Assert <" + assertName  + "> did not pass for arg1 <" + arg1 + "> and arg2 <" + arg2 + ">");
                     } else {
-                        console.log("PASSED : Assert <" + assertName  + "> for arg1 <" + arg1 + "> and arg2 <" + arg2 + ">");
+                        log("PASSED : Assert <" + assertName  + "> for arg1 <" + arg1 + "> and arg2 <" + arg2 + ">");
                     }
                 }
             }).call(this, i, assertFunctions[i]);
@@ -101,20 +145,71 @@ Plugin.prototype = {
 
         return this;
     })();
+    
+    var testRunner = (function(tests, continueOnError, createGUI) {
+        var testStats = {
+            totalTestCount : Object.keys(tests).length - 2,
+            testCount : 0,
+            passedTests : 0,
+            failedTests : 0
+        };
+        var log = createGUI && document ? (function() { document.write("<pre>"); var f = function(message) { document.write(escape(message).replace(/%(..)/g,"&#x$1;").replace("\n", "<br />") + "<br />"); }; Assert.log = f; return f; })() : console.log;
+        log("Running tests");
+        log("---------------");
+        for(var i in tests) {
+            if(i == "setUp" || i == "tearDown") continue;
+            testStats.testCount++;
+            log("Running test number " + testStats.testCount + "/" + testStats.totalTestCount + " name : '" + i + "'");
+            tests.setUp();
+            try { 
+                tests[i]();
+                testStats.passedTests++;
+            } catch(e) {
+                testStats.failedTests++;
+                log(["Test Failed for " + i,
+                    "Error Message : ", e.message,
+                    "Stack Trace : ", e.stack
+                ].join("\n"));
+                log("Test FAILED for test '" + i + "'");
+                if(!continueOnError) {
+                    break;
+                }
+            } finally {
+                tests.tearDown();
+            }
+        }
+        log("\n");
+        with(testStats) {
+            log(["TESTS COMPLETE",
+                "Total tests ran : " + testCount,
+                "Total test count : " + totalTestCount,
+                "passed tests : "  + passedTests,
+                "Failed Tests : " + failedTests
+            ].join("\n"));
+        }
+    });  
         
     var tests = {
         setUp : function() { 
             instance = new Plugin();
-            instance.say = function(chan, message) { console.log(message); }
+            instance.say = function(channel, message) { console.log(message); }
         },
         tearDown : function() { 
             instance = undefined;
         },
-        testNotRegisteredChannelStartGame : function() {
+        testNotRegisteredchannelStartGame : function() {
             instance.tryCreateGame("foo", "bar", "", "");
             Assert.assertNotNull(instance.getGame("foo"));
         },
-        testAlreadyRegisteredChannelStartGame : function() {
+        testSameGameInstanceReturned : function() {
+            var firstInstance = instance.tryCreateGame("foo", "bar", "", "");
+            var secondInstance = instance.getGame("foo");
+            Assert.assertNotNull(firstInstance);
+            Assert.assertNotNull(secondInstance);
+            Assert.assertEqual(firstInstance.channel, secondInstance.channel);
+            Assert.assertEqual(firstInstance.rawWord, secondInstance.rawWord);
+        },
+        testAlreadyRegisteredchannelStartGame : function() {
             instance.tryCreateGame("foo", "bar", "", "");    
             var previousWord = instance.getGame("foo").rawWord;
             instance.tryCreateGame("foo", "bar", "", "");
@@ -127,31 +222,46 @@ Plugin.prototype = {
             var secondCreatedUser = instance.getGame("second").user;
             assertNotEqual(firstCreatedUser, secondCreatedUser);
         },
-        testTryGuess : function() {
-
-        },
         testValidLetter : function() {
             instance.getRandomWord = function() { return "hello"; };
-            var game = instance.tryCreateGame("foo", "bar", "", "");
-            instance.guessLetter(game, "e");
-            assertEqual("_e___", game.modifiedWord);
+            var game = instance.tryCreateGame("foo", "bar", "", "");    
+            instance.tryGuess("foo", "bar", "", "e");
+
+            assertEqual("_e___", instance.getGame("foo").modifiedWord);
         },
         testValidLetters : function() {
             instance.getRandomWord = function() { return "hello"; };
-            var game = instance.tryCreateGame("foo", "bar", "", "");
-            instance.guessLetter(game, "l");
-            assertEqual("__ll_", game.modifiedWord);
+            instance.tryCreateGame("foo", "bar", "", "");    
+            instance.tryGuess("foo", "bar", "", "l");
+            assertEqual("__ll_", instance.getGame("foo").modifiedWord);
         },
         testValidNotFoundLetter : function() {
             instance.getRandomWord = function() { return "hello"; };
-            var game = instance.tryCreateGame("foo", "bar", "", "");
-            instance.guessLetter(game, "x");
-            assertEqual("_____", game.modifiedWord);
+            instance.tryCreateGame("foo", "bar", "", "");    
+            instance.tryGuess("foo", "bar", "", "x");
+            assertEqual("_____", instance.getGame("foo").modifiedWord);
         },
         testInvalidLetter : function() {
-            var game = instance.tryCreateGame("foo", "bar", "", "");
-            instance.guessLetter(game, "%");
-            Assert.assertFalse(/[^_]/.test(instance.getGame("foo").modifiedWord));
+            instance.getRandomWord = function() { return "hello"; };
+            instance.tryCreateGame("foo", "bar", "", "");    
+            instance.tryGuess("foo", "bar", "", "%");
+            assertEqual("_____", instance.getGame("foo").modifiedWord);
+        },
+        testGameCompleteWhenDone : function() {
+            instance.getRandomWord = function() { return "foo"; };
+            var game = instance.tryCreateGame("foo", "bar", "", "");    
+            instance.tryGuess("foo", "bar", "", "f");
+            instance.tryGuess("foo", "bar", "", "o");
+            assertEqual("foo", game.modifiedWord);
+            assertNull(instance.getGame("foo"));
+        },
+        testGameCompleteWhenNotDone : function(){
+            instance.getRandomWord = function() { return "foo"; };
+            var game = instance.tryCreateGame("foo", "bar", "", "");    
+            instance.tryGuess("foo", "bar", "", "f");
+
+            assertFalse(game.isComplete());
+            assertNotNull(instance.getGame("foo"));
         },
         testRememberUser : function() {
             instance.tryCreateGame("foo", "bar", "", "");
@@ -160,30 +270,10 @@ Plugin.prototype = {
         testBlankedOutWord : function() { 
             instance.tryCreateGame("foo", "bar", "", "");
             Assert.assertFalse(/[^_]/.test(instance.getGame("foo").modifiedWord));
-        }
+        },
     };
-    
-    console.log("Running hangman tests");
-    var totalTests = Object.keys(tests).length - 2;
-    var testCount = 0;
-    var runAllTests = true;
-    for(var i in tests) {
-        if(i == "setUp" || i == "tearDown") continue;
-        testCount++;
-        console.log("Running test number <" + testCount + "/" + totalTests + " name <" + i + ">");
-        tests.setUp();
-        try { 
-            tests[i]();
-        } catch(e) {
-            console.log(e);
-            console.log("Test FAILED for test <" + i + ">");
-            if(!runAllTests) {
-                break;
-            }
-        } finally {
-            tests.tearDown();
-        }
-    }
+
+    testRunner(tests, false, true);
 })();
 
 var exports = {};
