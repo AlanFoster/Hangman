@@ -7,7 +7,7 @@ var Plugin = function () {
 
      this.triggers = [
         [/^!start/, this.tryCreateGame],
-        [/^!guess (.*)/, this.tryGuess]
+        [/^!guess (.*)/, function(channel, user, mask, match) { this.tryGuess(channel, user, mask, match[1]); }]
      ];
      
     this.help = [
@@ -36,27 +36,28 @@ Plugin.prototype = {
     tryGuess : function(channel, user, mask, match) {
         var channelGame = this.getGame(channel);
         if(channelGame === undefined) {
-            this.say("No game has been started for this channel. To begin one, use the '!start' command. ");
+            this.say(channel, "No game has been started for this channel. To begin one, use the '!start' command. ");
             return;
         }
                 
         channelGame.guessLetter(match.charAt(0));
+
         if(channelGame.isComplete()){ 
-            this.say("Well done! " + user + " + has won the game! The word was : " + channelGame.rawWord);
+            this.say(channel, "Well done! " + user + " has won the game! The word was : " + channelGame.rawWord);
             delete this.currentGames[channel];
         } else if(!channelGame.hasGuessesLeft()) {
-            this.say("Game Over! You have no remaining guesses! The word was : " + channelGame.rawWord);
+            this.say(channel, "Game Over! You have no remaining guesses! The word was : " + channelGame.rawWord);
             delete this.currentGames[channel];
         }
     },
     startNewGame : function(channel, user) { 
         var randomWord = this.getRandomWord();
         var game = new HangmanGame(channel, user, randomWord);
-        game.say = this.say;
+        game.say = function(message) { this.say(channel, message); }.bind(this);
         return game;
     },
     getRandomWord : function(game) {
-        return "testingabc123";
+        return "testingabc";
     },
     getGame : function(channel) {
         return this.currentGames[channel];
@@ -71,14 +72,16 @@ var HangmanGame = function(channel, user, word){
     this.user = user;
     
     // TODO array of char is better.
-    this.rawWord = word;   
-    this.modifiedWord = word.replace(/./g, "_");
+    this.rawWord = word;
+    this.arrayModifiedWord = word.replace(/./g, "_").split("");
     
-    this.guessedLetters = new Array(26);
+    this.guessedLetters = [];
 
     this.totalWrong = 0;
     this.maxGuesses = 6;
     
+    this.updateState();
+
     return this;
 };
 
@@ -86,48 +89,60 @@ HangmanGame.prototype = {
     guessLetter : function(letter) {
         if(!this.hasGuessesLeft()) {
             throw new Error("You have no guesses left");
-         }
+        }
     
         letter = letter.toLowerCase();
-        var intVal = letter.charCodeAt(0) - 97;
-        if(!(intVal >= 0 && intVal <= 26)) {
+
+        if(!(letter >= 'a' && letter <= 'z')) {
             this.say("Invalid character " + letter + ". a-z only");
+            return;
         }
+        
         var guessedLetters = this.guessedLetters;
-        if(guessedLetters[intVal]) {
-            this.say("You have already guessed the letter " + letter + ". Try again");
-        } else {
-            this.say("You guessed " + letter);
-            
-            var charFound = false;
-            
-            for(var i in this.rawWord) {
-                i = Number(i);
-                if(this.rawWord[i] === letter) {
-                    var str = this.modifiedWord;
-                    this.modifiedWord = str.substr(0, i) + letter + str.substr(1 + i);
-                    charFound = true;
-                }
-            }
+        if(guessedLetters.indexOf(letter) > -1) {
+            this.say("You have already guessed the letter " + letter + ". Try again. " + this.getState());
+        } else {      
+            this.guessedLetters.push(letter);
+            var charFound = this.addLetter(letter);
+            this.updateState();
             
             if(charFound) {
-                this.say("You guessed correctly! The word is now : " + this.modifiedWord);
+                this.say("You guessed '" + letter + "' correctly! The word is now : " + this.getState());
             } else {
                 this.totalWrong++;
-                this.say("Character not found! You have got " + (this.maxGuesses - this.totalWrong) + " guesses left! " + this.modifiedWord);
+                this.say("Character '" + letter + "' not found! You have got " + (this.maxGuesses - this.totalWrong) + " guesses left! " + this.getState());
             }
-            
-            guessedLetters[intVal] = true;
         }
+    },
+    addLetter : function(letter) {
+        var charFound;
+        for(var i in this.rawWord) {
+            i = Number(i);
+            if(this.rawWord[i] === letter) {
+                this.arrayModifiedWord[i] = letter;
+
+                charFound = true;
+            }
+        }
+        return charFound;
     },
     isComplete : function(){
         return this.modifiedWord.indexOf("_") === -1;
     },
     hasGuessesLeft : function() {
         return this.totalWrong < (this.maxGuesses - 1);
+    },
+    updateState : function() {
+        this.modifiedWord = this.arrayModifiedWord.join("");
+        this.state = "Current word : " + this.modifiedWord + "; Current Guesses : " + this.guessedLetters.join(", ");
+    },
+    getState : function() {
+        if(this.state === undefined) {
+            this.updateState();
+        }
+        return this.state;
     }
 };
-
 
 // TDD plz
 (function tests() {   
