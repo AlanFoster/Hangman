@@ -44,6 +44,9 @@ Plugin.prototype = {
         if(channelGame.isComplete()){ 
             this.say("Well done! " + user + " + has won the game! The word was : " + channelGame.rawWord);
             delete this.currentGames[channel];
+        } else if(!channelGame.hasGuessesLeft()) {
+            this.say("Game Over! You have no remaining guesses! The word was : " + channelGame.rawWord);
+            delete this.currentGames[channel];
         }
     },
     startNewGame : function(channel, user) { 
@@ -73,11 +76,18 @@ var HangmanGame = function(channel, user, word){
     
     this.guessedLetters = new Array(26);
 
+    this.totalWrong = 0;
+    this.maxGuesses = 6;
+    
     return this;
 };
 
 HangmanGame.prototype = {
     guessLetter : function(letter) {
+        if(!this.hasGuessesLeft()) {
+            throw new Error("You have no guesses left");
+         }
+    
         letter = letter.toLowerCase();
         var intVal = letter.charCodeAt(0) - 97;
         if(!(intVal >= 0 && intVal <= 26)) {
@@ -92,7 +102,7 @@ HangmanGame.prototype = {
             var charFound = false;
             
             for(var i in this.rawWord) {
-                i = parseInt(i, 10);
+                i = Number(i);
                 if(this.rawWord[i] === letter) {
                     var str = this.modifiedWord;
                     this.modifiedWord = str.substr(0, i) + letter + str.substr(1 + i);
@@ -103,7 +113,8 @@ HangmanGame.prototype = {
             if(charFound) {
                 this.say("You guessed correctly! The word is now : " + this.modifiedWord);
             } else {
-                this.say("Character not found! " + this.modifiedWord);
+                this.totalWrong++;
+                this.say("Character not found! You have got " + (this.maxGuesses - this.totalWrong) + " guesses left! " + this.modifiedWord);
             }
             
             guessedLetters[intVal] = true;
@@ -111,6 +122,9 @@ HangmanGame.prototype = {
     },
     isComplete : function(){
         return this.modifiedWord.indexOf("_") === -1;
+    },
+    hasGuessesLeft : function() {
+        return this.totalWrong < (this.maxGuesses - 1);
     }
 };
 
@@ -153,7 +167,8 @@ HangmanGame.prototype = {
             passedTests : 0,
             failedTests : 0
         };
-        var log = createGUI && document ? (function() { document.write("<pre>"); var f = function(message) { document.write(escape(message).replace(/%(..)/g,"&#x$1;").replace("\n", "<br />") + "<br />"); }; Assert.log = f; return f; })() : console.log;
+        var log = createGUI && document ? (function() { document.write("<pre>"); var f = function(message) { document.write(escape(message).replace(/%(..)/g,"&#x$1;").replace("\n", "<br />") + "<br />"); }; Assert.log = f; return f; })() : function(m) { console.log(m); };
+
         log("Running tests");
         log("---------------");
         for(var i in tests) {
@@ -262,6 +277,17 @@ HangmanGame.prototype = {
 
             assertFalse(game.isComplete());
             assertNotNull(instance.getGame("foo"));
+        },
+        testMaxGuessesEndsGame : function() {
+            instance.getRandomWord = function() { return "hello"; };
+            var game = instance.tryCreateGame("foo", "bar", "", "");  
+            var guesses = ["a", "b", "c", "d", "e", "f"];
+            for(var i in guesses) {
+                assertTrue(game.hasGuessesLeft());
+                instance.tryGuess("foo", "bar", "", guesses[i]);
+            }
+            assertFalse(game.hasGuessesLeft());
+            assertNull(instance.getGame("foo"));
         },
         testRememberUser : function() {
             instance.tryCreateGame("foo", "bar", "", "");
