@@ -7,12 +7,12 @@ var Plugin = function () {
 
      this.triggers = [
         [/^!start/, this.tryCreateGame],
-        [/^!guess (.*)/, function(channel, user, mask, match) { this.tryGuess(channel, user, mask, match[1]); }]
+        [/^!guess (.)/, function(channel, user, mask, match) { this.tryGuess(channel, user, mask, match[1]); }]
      ];
      
     this.help = [
         ["!start", "Creates a new game for this channelnel if one isn't already started"],
-        ["!guess <letter(s)>", "Guess n letters on the current game being played."]
+        ["!guess <letter>", "Guess one letter on the current game being played."]
     ];
           
     this.currentGames = {};
@@ -144,38 +144,42 @@ HangmanGame.prototype = {
     }
 };
 
-// TDD plz
-(function tests() {   
+var TestSuite =
+(function tests(Assert, TestRunner) {   
     // Helper methods
     var Assert = (function() {
         this.log = console.log;
-        var assertFunctions = {
-            "assertEqual" : function(expected, actual) { return expected === actual; },
-            "assertNotEqual" : function(expected, actual) { return expected !== actual; },
-            "assertNotNull": function(obj) { return obj !== undefined; },
-            "assertNull" : function(obj) { return obj === undefined; },
-            "assertFalse" : function(obj) { return obj === false; },
-            "assertTrue" : function(obj) { return obj === true; }
-        }
+        var assertDescriptions = [
+            {name : "assertEqual", func : function(expected, actual) { return expected === actual; }, logMessage : "Expected <{0}> Received <{1}>"},
+            {name : "assertNotEqual", func : function(expected, actual) { return expected !== actual; }, logMessage : "Expected <{0}> Received <{0}>"},
+            {name : "assertNull", func : function(obj) { return obj === undefined; }, logMessage : "Expected <null> Received <{0}>"},
+            {name : "assertNotNull", func : function(obj) { return obj !== undefined; }, logMessage : "Expected <Not null> Received <{0}>"},
+            {name : "assertTrue", func : function(obj) { return obj === true; }, logMessage : "Expected <true> Received <{0}>"},
+            {name : "assertFalse", func : function(obj) { return obj === false; }, logMessage : "Expected <false> Received <{0}>"},
+        ];
         
-        for(var i in assertFunctions) {
-            (function(assertName, assertFunction) {
-                this[assertName] = function(arg1, arg2) {
-                    var assertPassed = assertFunction(arg1, arg2);
-                
+        assertDescriptions.forEach(function(assertDescription) {
+            (function(assertName, assertFunction, logMessage) {
+                this[assertName] = function() {
+                    var assertPassed = assertFunction.apply(undefined, arguments);
+                    var formattedLogMessage = (function(str, values) {
+                        return str.replace(/\{((\d+))\}/g, function(match, digit) { return values[digit]; });
+                    })(logMessage, arguments);
                     if(!assertPassed) {
-                        throw new Error("FAILED : Assert <" + assertName  + "> did not pass for arg1 <" + arg1 + "> and arg2 <" + arg2 + ">");
+                        throw new Error("FAILED  :: " + assertName + " : " + formattedLogMessage); 
                     } else {
-                        log("PASSED : Assert <" + assertName  + "> for arg1 <" + arg1 + "> and arg2 <" + arg2 + ">");
+                        log("PASSED :: " + assertName + " : " + formattedLogMessage); // Assert <" + assertName  + "> for arg1 <" + arg1 + "> and arg2 <" + arg2 + ">");
                     }
                 }
-            }).call(this, i, assertFunctions[i]);
-        }
+            }).call(this, assertDescription.name, assertDescription.func, assertDescription.logMessage);
+        });
+        
+        assertDescriptions.length = 0;
 
         return this;
     })();
     
-    var testRunner = (function(tests, continueOnError, createGUI) {
+    var TestRunner = (function(tests, continueOnError, createGUI) {
         var testStats = {
             totalTestCount : Object.keys(tests).length - 2,
             testCount : 0,
@@ -218,8 +222,13 @@ HangmanGame.prototype = {
             ].join("\n"));
         }
     });  
-        
-    var tests = {
+    
+    return {Assert : Assert, TestRunner : TestRunner};
+})();
+
+
+(function(Assert, TestRunner){
+ var tests = {
         setUp : function() { 
             instance = new Plugin();
             instance.say = function(channel, message) { console.log(message); }
@@ -250,48 +259,48 @@ HangmanGame.prototype = {
             var firstCreatedUser = instance.getGame("first").user;
             instance.tryCreateGame("second", "barTwo", "", "");
             var secondCreatedUser = instance.getGame("second").user;
-            assertNotEqual(firstCreatedUser, secondCreatedUser);
+            Assert.assertNotEqual(firstCreatedUser, secondCreatedUser);
         },
         testValidLetter : function() {
             instance.getRandomWord = function() { return "hello"; };
             var game = instance.tryCreateGame("foo", "bar", "", "");    
             instance.tryGuess("foo", "bar", "", "e");
 
-            assertEqual("_e___", instance.getGame("foo").modifiedWord);
+            Assert.assertEqual("_e___", instance.getGame("foo").modifiedWord);
         },
         testValidLetters : function() {
             instance.getRandomWord = function() { return "hello"; };
             instance.tryCreateGame("foo", "bar", "", "");    
             instance.tryGuess("foo", "bar", "", "l");
-            assertEqual("__ll_", instance.getGame("foo").modifiedWord);
+            Assert.assertEqual("__ll_", instance.getGame("foo").modifiedWord);
         },
         testValidNotFoundLetter : function() {
             instance.getRandomWord = function() { return "hello"; };
             instance.tryCreateGame("foo", "bar", "", "");    
             instance.tryGuess("foo", "bar", "", "x");
-            assertEqual("_____", instance.getGame("foo").modifiedWord);
+            Assert.assertEqual("_____", instance.getGame("foo").modifiedWord);
         },
         testInvalidLetter : function() {
             instance.getRandomWord = function() { return "hello"; };
             instance.tryCreateGame("foo", "bar", "", "");    
             instance.tryGuess("foo", "bar", "", "%");
-            assertEqual("_____", instance.getGame("foo").modifiedWord);
+            Assert.assertEqual("_____", instance.getGame("foo").modifiedWord);
         },
         testGameCompleteWhenDone : function() {
             instance.getRandomWord = function() { return "foo"; };
             var game = instance.tryCreateGame("foo", "bar", "", "");    
             instance.tryGuess("foo", "bar", "", "f");
             instance.tryGuess("foo", "bar", "", "o");
-            assertEqual("foo", game.modifiedWord);
-            assertNull(instance.getGame("foo"));
+            Assert.assertEqual("foo", game.modifiedWord);
+            Assert.assertNull(instance.getGame("foo"));
         },
         testGameCompleteWhenNotDone : function(){
             instance.getRandomWord = function() { return "foo"; };
             var game = instance.tryCreateGame("foo", "bar", "", "");    
             instance.tryGuess("foo", "bar", "", "f");
 
-            assertFalse(game.isComplete());
-            assertNotNull(instance.getGame("foo"));
+            Assert.assertFalse(game.isComplete());
+            Assert.assertNotNull(instance.getGame("foo"));
         },
         testMaxGuessesEndsGame : function() {
             instance.getRandomWord = function() { return "hello"; };
@@ -301,8 +310,8 @@ HangmanGame.prototype = {
                 assertTrue(game.hasGuessesLeft());
                 instance.tryGuess("foo", "bar", "", guesses[i]);
             }
-            assertFalse(game.hasGuessesLeft());
-            assertNull(instance.getGame("foo"));
+            Assert.assertFalse(game.hasGuessesLeft());
+            Assert.assertNull(instance.getGame("foo"));
         },
         testRememberUser : function() {
             instance.tryCreateGame("foo", "bar", "", "");
@@ -313,9 +322,9 @@ HangmanGame.prototype = {
             Assert.assertFalse(/[^_]/.test(instance.getGame("foo").modifiedWord));
         },
     };
+    
+    TestRunner(tests, false, true);
+})(TestSuite.Assert, TestSuite.TestRunner);
 
-    testRunner(tests, false, true);
-})();
 
-var exports = {};
 exports.Plugin = Plugin;
